@@ -14,7 +14,7 @@ public class DynamicSQLToCSharp
         using (SqlConnection connection = new SqlConnection(connectionString))
         {
             // Fetch table data
-            string query = $"SELECT TOP 10 * FROM {tableName}";
+            string query = $"SELECT * FROM {tableName}";
             SqlDataAdapter adapter = new SqlDataAdapter(query, connection);
             DataTable table = new DataTable();
             adapter.Fill(table);
