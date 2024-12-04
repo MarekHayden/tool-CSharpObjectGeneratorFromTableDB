@@ -9,12 +9,22 @@ using System.Text;
 
 public class DynamicSQLToCSharp
 {
-    public static string GenerateCSharpCode(string connectionString, string tableName, Type modelType)
+    public static string GenerateCSharpCode(string connectionString, string tableFullName, Type modelType)
     {
         using (SqlConnection connection = new SqlConnection(connectionString))
         {
-            // Fetch table data
-            string query = $"SELECT * FROM {tableName}";
+            connection.Open();
+
+            // Extract schema and table name
+            var schemaAndTable = tableFullName.Split('.');
+            string schema = schemaAndTable.Length == 2 ? schemaAndTable[0] : null;
+            string tableName = schemaAndTable.Length == 2 ? schemaAndTable[1] : tableFullName;
+
+            // Get identity columns
+            var identityColumns = GetIdentityColumns(connection, schema, tableName);
+
+            // Query the table data
+            string query = $"SELECT * FROM {tableFullName}";
             SqlDataAdapter adapter = new SqlDataAdapter(query, connection);
             DataTable table = new DataTable();
             adapter.Fill(table);
@@ -32,8 +42,13 @@ public class DynamicSQLToCSharp
 
                 foreach (DataColumn column in table.Columns)
                 {
-                    // Match column name to model property (case-insensitive)
                     string columnName = column.ColumnName.ToLower();
+
+                    // Skip identity columns
+                    if (identityColumns.Contains(columnName))
+                        continue;
+
+                    // Match column name to model property (case-insensitive)
                     if (modelProperties.TryGetValue(columnName, out string propertyName))
                     {
                         string propertyValue = FormatValue(row[column], column.DataType);
@@ -46,6 +61,32 @@ public class DynamicSQLToCSharp
 
             return result.ToString();
         }
+    }
+
+    private static HashSet<string> GetIdentityColumns(SqlConnection connection, string schema, string tableName)
+    {
+        HashSet<string> identityColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        string query = $@"
+            SELECT COLUMN_NAME
+            FROM INFORMATION_SCHEMA.COLUMNS
+            WHERE TABLE_SCHEMA = @Schema AND TABLE_NAME = @TableName 
+              AND COLUMNPROPERTY(OBJECT_ID(QUOTENAME(@Schema) + '.' + QUOTENAME(@TableName)), COLUMN_NAME, 'IsIdentity') = 1";
+
+        using (SqlCommand command = new SqlCommand(query, connection))
+        {
+            command.Parameters.AddWithValue("@Schema", schema ?? "dbo");  // Default schema is 'dbo' if not provided
+            command.Parameters.AddWithValue("@TableName", tableName);
+            using (SqlDataReader reader = command.ExecuteReader())
+            {
+                while (reader.Read())
+                {
+                    identityColumns.Add(reader.GetString(0)); // Add the identity column names
+                }
+            }
+        }
+
+        return identityColumns;
     }
 
     private static string FormatValue(object value, Type type)
